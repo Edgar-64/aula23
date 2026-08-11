@@ -1,0 +1,512 @@
+
+
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Controle de Acesso</title>
+
+    <script src="https://unpkg.com/html5-qrcode"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Roboto,
+                sans-serif;
+        }
+
+        body {
+            background: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 16px;
+        }
+
+        .card {
+            background: #fff;
+            width: 100%;
+            max-width: 420px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            padding: 24px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 1.25rem;
+            color: #1e293b;
+            margin-bottom: 8px;
+        }
+
+        p.subtitle {
+            color: #64748b;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background: #0284c7;
+            color: #fff;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #0369a1;
+        }
+
+        button.secondary {
+            background: #e2e8f0;
+            color: #334155;
+        }
+
+        button.secondary:hover {
+            background: #cbd5e1;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        #reader {
+            width: 100%;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .status-box {
+            padding: 14px;
+            margin-top: 8px;
+            display: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+        }
+
+        .status-success {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #86efac;
+        }
+
+        .status-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+
+        .status-info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="card">
+
+        <h1>Controle de Fluxo</h1>
+
+        <p class="subtitle">
+            Ponto Físico:
+            <strong>SETOR-01</strong>
+        </p>
+
+        <div class="btn-group">
+
+            <button
+                id="btnNfc"
+                onclick="iniciarLeituraNFC()">
+                📡 Ler com Aproximação (NFC)
+            </button>
+
+            <button
+                class="secondary"
+                id="btnQr"
+                onclick="toggleQrReader()">
+                📷 Ler com Câmera (QR Code)
+            </button>
+
+        </div>
+
+        <div id="reader"></div>
+
+        <div
+            id="statusBox"
+            class="status-box">
+        </div>
+
+    </div>
+
+    <script>
+
+        const CODIGO_PONTO = "SETOR-01";
+
+        let qrScanner = null;
+        let lendoQR = false;
+
+
+        // =========================================================
+        // STATUS
+        // =========================================================
+
+        function exibirStatus(tipo, mensagem) {
+
+            const box = document.getElementById("statusBox");
+
+            box.className = `status-box status-${tipo}`;
+
+            box.innerHTML = mensagem;
+
+            box.style.display = "block";
+        }
+
+
+        // =========================================================
+        // NFC
+        // =========================================================
+
+        async function iniciarLeituraNFC() {
+
+            if (!("NDEFReader" in window)) {
+
+                exibirStatus(
+                    "error",
+                    "NFC não é suportado neste navegador. Utilize o QR Code."
+                );
+
+                return;
+            }
+
+            try {
+
+                const ndef = new NDEFReader();
+
+                await ndef.scan();
+
+                exibirStatus(
+                    "info",
+                    "📡 Aproxime o celular da tag NFC..."
+                );
+
+                ndef.onreading = (event) => {
+
+                    const serialNumber = event.serialNumber;
+
+                    console.log(
+                        "NFC detectado:",
+                        serialNumber
+                    );
+
+                    /*
+                     * IMPORTANTE:
+                     * O NFC possui um fluxo diferente do QR.
+                     *
+                     * Não enviamos o serialNumber para
+                     * validar_acesso.php, pois esse endpoint
+                     * espera um TOKEN de QR.
+                     */
+
+                    exibirStatus(
+                        "info",
+                        `NFC detectado.<br>
+                         UID: ${serialNumber}`
+                    );
+                };
+
+            } catch (error) {
+
+                console.error(
+                    "Erro no NFC:",
+                    error
+                );
+
+                exibirStatus(
+                    "error",
+                    "Erro ao iniciar NFC: " + error.message
+                );
+            }
+        }
+
+
+        // =========================================================
+        // QR CODE
+        // =========================================================
+
+        async function toggleQrReader() {
+
+            const readerDiv =
+                document.getElementById("reader");
+
+            const btnQr =
+                document.getElementById("btnQr");
+
+
+            // Se já estiver lendo, encerra
+            if (lendoQR) {
+
+                await pararLeitorQR();
+
+                return;
+            }
+
+
+            try {
+
+                lendoQR = true;
+
+                readerDiv.style.display = "block";
+
+                btnQr.innerText = "⏹️ Parar Leitor QR";
+
+
+                qrScanner =
+                    new Html5Qrcode("reader");
+
+
+                await qrScanner.start(
+
+                    {
+                        facingMode: "environment"
+                    },
+
+                    {
+                        fps: 10,
+
+                        qrbox: {
+                            width: 250,
+                            height: 250
+                        },
+
+                        aspectRatio: 1.0
+                    },
+
+                    async (decodedText) => {
+
+                        console.log(
+                            "QR CODE LIDO:",
+                            decodedText
+                        );
+
+
+                        // Para o leitor
+                        await pararLeitorQR();
+
+
+                        // Envia o token para o PHP
+                        await processarRegistro(
+                            decodedText
+                        );
+                    },
+
+                    (errorMessage) => {
+
+                        // Erros de tentativa de leitura
+                        // são normais e não precisam
+                        // aparecer para o usuário.
+
+                    }
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "Erro ao iniciar leitor QR:",
+                    error
+                );
+
+                lendoQR = false;
+
+                readerDiv.style.display = "none";
+
+                btnQr.innerText =
+                    "📷 Ler com Câmera (QR Code)";
+
+                exibirStatus(
+                    "error",
+                    "Não foi possível acessar a câmera."
+                );
+            }
+        }
+
+
+        // =========================================================
+        // PARA O LEITOR QR
+        // =========================================================
+
+        async function pararLeitorQR() {
+
+            const readerDiv =
+                document.getElementById("reader");
+
+            const btnQr =
+                document.getElementById("btnQr");
+
+
+            if (qrScanner) {
+
+                try {
+
+                    if (lendoQR) {
+                        await qrScanner.stop();
+                    }
+
+                } catch (error) {
+
+                    console.warn(
+                        "Erro ao parar leitor:",
+                        error
+                    );
+                }
+
+                qrScanner.clear();
+
+                qrScanner = null;
+            }
+
+
+            lendoQR = false;
+
+            readerDiv.style.display = "none";
+
+            btnQr.innerText =
+                "📷 Ler com Câmera (QR Code)";
+        }
+
+
+        // =========================================================
+        // ENVIA TOKEN PARA O BACKEND
+        // =========================================================
+
+        async function processarRegistro(token) {
+
+            exibirStatus(
+                "info",
+                "🔍 Validando QR Code..."
+            );
+
+
+            // Remove espaços acidentais
+            token = token.trim();
+
+
+            if (!token) {
+
+                exibirStatus(
+                    "error",
+                    "QR Code vazio ou inválido."
+                );
+
+                return;
+            }
+
+
+            console.log(
+                "Token enviado:",
+                token
+            );
+
+
+            try {
+
+                const response = await fetch(
+                    "validar_acesso.php",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            token: token
+                        })
+                    }
+                );
+
+
+                const resultado =
+                    await response.json();
+
+
+                console.log(
+                    "Resposta do servidor:",
+                    resultado
+                );
+
+
+                // =================================================
+                // ACESSO LIBERADO
+                // =================================================
+
+                if (
+                    response.ok &&
+                    resultado.status === "sucesso"
+                ) {
+
+                    exibirStatus(
+                        "success",
+                        `<strong>✓ ACESSO LIBERADO!</strong><br>
+                         ${resultado.mensagem}`
+                    );
+
+                    return;
+                }
+
+
+                // =================================================
+                // ACESSO NEGADO
+                // =================================================
+
+                exibirStatus(
+                    "error",
+                    `<strong>✕ ACESSO NEGADO</strong><br>
+                     ${resultado.mensagem || "QR Code inválido ou expirado."}`
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "Erro na comunicação:",
+                    error
+                );
+
+                exibirStatus(
+                    "error",
+                    "Falha na comunicação com o servidor."
+                );
+            }
+        }
+
+    </script>
+
+</body>
+
+</html>

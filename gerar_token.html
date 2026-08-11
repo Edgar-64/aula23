@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Acesso com QR Code</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; }
+        #qrcode { margin: 20px; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .tempo { font-size: 1.2rem; font-weight: bold; color: #e74c3c; }
+    </style>
+</head>
+<body>
+
+    <h2>Aproxime da catraca</h2>
+    <div id="qrcode"></div>
+    <p>Atualiza em: <span id="contador" class="tempo">30</span>s</p>
+
+    <script>
+        let temporizadorRefresh;
+        let temporizadorContador;
+
+        function carregarQRCode() {
+            fetch('gerar_token.php')
+            .then(resposta => resposta.json())
+            .then(dados => {
+                // 1. Limpa o QR Code anterior para não empilhar um em cima do outro
+                document.getElementById("qrcode").innerHTML = "";
+
+                // 2. Gera o novo QR Code usando o token recebido do PHP
+                new QRCode(document.getElementById("qrcode"), dados.token);
+
+                // 3. Inicia o contador visual na tela
+                iniciarContador(dados.tempo_vida);
+
+                // 4. Programa a próxima atualização (1 segundo antes de expirar)
+                clearTimeout(temporizadorRefresh);
+                temporizadorRefresh = setTimeout(carregarQRCode, (dados.tempo_vida - 1) * 1000);
+            })
+            .catch(erro => console.error("Erro ao carregar token:", erro));
+        }
+
+        function iniciarContador(segundos) {
+            clearInterval(temporizadorContador);
+            let elemento = document.getElementById('contador');
+            elemento.innerText = segundos;
+
+            temporizadorContador = setInterval(() => {
+                segundos--;
+                elemento.innerText = segundos;
+                if (segundos <= 0) clearInterval(temporizadorContador);
+            }, 1000);
+        }
+
+        // Inicia o processo assim que a página carrega
+        carregarQRCode();
+    </script>
+
+</body>
+</html>

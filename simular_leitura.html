@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Simular Leitura de Catraca</title>
+</head>
+<body>
+    <h2>Simulador de Leitura de QR Code</h2>
+    <button onclick="enviarToken()">Simular Leitura do Token</button>
+    <pre id="resultado"></pre>
+
+    <script>
+        function enviarToken() {
+            // Token que você enviou
+            const tokenParaTestar = "75ca5d3c3466d954c80ab9c140586c1c";
+
+            fetch('validar_acesso.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ token: tokenParaTestar })
+            })
+            .then(resposta => resposta.json())
+            .then(dados => {
+                document.getElementById('resultado').innerText = JSON.stringify(dados, null, 2);
+            })
+            .catch(erro => {
+                document.getElementById('resultado').innerText = "Erro: " + erro;
+            });
+        }
+    </script>
+</body>
+</html>
