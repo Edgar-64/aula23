@@ -7,7 +7,7 @@ require 'conexao.php'; // Sua conexão PDO
 $token = bin2hex(random_bytes(16));
 
 // Define a expiração para 30 segundos a partir de agora
-$tempo_vida = 1000;
+$tempo_vida = 30;
 $expira_em = date('Y-m-d H:i:s', strtotime("+$tempo_vida seconds"));
 
 // Salva no banco de dados

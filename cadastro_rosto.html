@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadastro Facial</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background: #f0f2f5;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 700px;
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 8px 30px rgba(0,0,0,.10);
+            text-align: center;
+        }
+
+        h1 {
+            color: #1e293b;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #64748b;
+            margin-bottom: 20px;
+        }
+
+        select, button {
+            width: 100%;
+            padding: 13px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            font-size: 1rem;
+            margin-bottom: 12px;
+        }
+
+        button {
+            border: none;
+            background: #0284c7;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #0369a1;
+        }
+
+        button:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        #video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 15px auto;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #111827;
+        }
+
+        video {
+            display: block;
+            width: 100%;
+            height: auto;
+            transform: scaleX(-1);
+        }
+
+        #overlay {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            transform: scaleX(-1);
+        }
+
+        #status {
+            padding: 14px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .info {
+            display: block !important;
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .success {
+            display: block !important;
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .error {
+            display: block !important;
+            background: #fee2e2;
+            color: #991b1b;
+        }
+    </style>
+</head>
+
+<body>
+<div class="card">
+    <h1>👤 Cadastro Facial</h1>
+    <p class="subtitle">Cadastre o rosto de um funcionário para validação de acesso.</p>
+
+    <select id="funcionario">
+        <option value="">Carregando funcionários...</option>
+    </select>
+
+    <button id="btnIniciar" onclick="iniciarCamera()" disabled>
+        📷 Iniciar câmera
+    </button>
+
+    <div id="video-container" style="display:none;">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+    </div>
+
+    <button id="btnCadastrar" onclick="cadastrarRosto()" disabled>
+        ✓ Cadastrar rosto
+    </button>
+
+    <div id="status"></div>
+</div>
+
+<script>
+const MODEL_URL = "https://justadudewhohacks.github.io/face-api.js/models";
+
+let video = null;
+let stream = null;
+let modelosCarregados = false;
+
+const selectFuncionario = document.getElementById("funcionario");
+const btnIniciar = document.getElementById("btnIniciar");
+const btnCadastrar = document.getElementById("btnCadastrar");
+const videoContainer = document.getElementById("video-container");
+const statusBox = document.getElementById("status");
+const overlay = document.getElementById("overlay");
+
+function status(tipo, mensagem) {
+    statusBox.className = tipo;
+    statusBox.innerHTML = mensagem;
+}
+
+async function carregarFuncionarios() {
+    try {
+        const response = await fetch("listar_funcionarios.php", {
+            cache: "no-store"
+        });
+
+        if (!response.ok) {
+            throw new Error("HTTP " + response.status);
+        }
+
+        const dados = await response.json();
+
+        selectFuncionario.innerHTML = '<option value="">Selecione um funcionário</option>';
+
+        if (!dados.sucesso) {
+            throw new Error(dados.mensagem || "Não foi possível carregar funcionários.");
+        }
+
+        dados.funcionarios.forEach(funcionario => {
+            const option = document.createElement("option");
+            option.value = funcionario.id;
+            option.textContent = `${funcionario.nome} - Matrícula ${funcionario.matricula}`;
+            selectFuncionario.appendChild(option);
+        });
+
+        btnIniciar.disabled = false;
+
+    } catch (erro) {
+        console.error(erro);
+        status("error", "Erro ao carregar funcionários.");
+    }
+}
+
+async function carregarModelos() {
+    status("info", "Carregando modelo facial...");
+
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+    modelosCarregados = true;
+    status("success", "Modelo facial carregado.");
+}
+
+async function iniciarCamera() {
+    if (!selectFuncionario.value) {
+        status("error", "Selecione um funcionário primeiro.");
+        return;
+    }
+
+    try {
+        btnIniciar.disabled = true;
+
+        if (!modelosCarregados) {
+            await carregarModelos();
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: "user",
+                width: { ideal: 640 },
+                height: { ideal: 480 }
+            },
+            audio: false
+        });
+
+        video = document.getElementById("video");
+        video.srcObject = stream;
+
+        await new Promise(resolve => {
+            video.onloadedmetadata = resolve;
+        });
+
+        videoContainer.style.display = "block";
+
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+
+        btnCadastrar.disabled = false;
+
+        status(
+            "info",
+            "Posicione apenas uma pessoa em frente à câmera e olhe para ela."
+        );
+
+    } catch (erro) {
+        console.error(erro);
+        btnIniciar.disabled = false;
+        status(
+            "error",
+            "Não foi possível acessar a câmera. Verifique a permissão do navegador."
+        );
+    }
+}
+
+async function cadastrarRosto() {
+    if (!video || !stream) {
+        status("error", "Inicie a câmera primeiro.");
+        return;
+    }
+
+    if (!selectFuncionario.value) {
+        status("error", "Selecione um funcionário.");
+        return;
+    }
+
+    btnCadastrar.disabled = true;
+    status("info", "Analisando rosto...");
+
+    try {
+        const deteccoes = await faceapi
+            .detectAllFaces(
+                video,
+                new faceapi.TinyFaceDetectorOptions({
+                    inputSize: 416,
+                    scoreThreshold: 0.5
+                })
+            )
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+
+        if (deteccoes.length === 0) {
+            throw new Error("Nenhum rosto foi detectado.");
+        }
+
+        if (deteccoes.length > 1) {
+            throw new Error("Mais de um rosto foi detectado. Deixe apenas uma pessoa na frente da câmera.");
+        }
+
+        const deteccao = deteccoes[0];
+
+        if (deteccao.detection.score < 0.60) {
+            throw new Error("Rosto detectado com baixa confiança. Aproxime-se e melhore a iluminação.");
+        }
+
+        const descriptor = Array.from(deteccao.descriptor);
+
+        const response = await fetch("cadastrar_rosto.php", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                funcionario_id: Number(selectFuncionario.value),
+                face_embedding: descriptor
+            })
+        });
+
+        const resultado = await response.json();
+
+        if (!response.ok || !resultado.sucesso) {
+            throw new Error(
+                resultado.mensagem || "Erro ao salvar o rosto."
+            );
+        }
+
+        status(
+            "success",
+            `✓ Rosto de <strong>${resultado.funcionario}</strong> cadastrado com sucesso!`
+        );
+
+    } catch (erro) {
+        console.error(erro);
+        status("error", erro.message);
+    } finally {
+        btnCadastrar.disabled = false;
+    }
+}
+
+window.addEventListener("beforeunload", () => {
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+    }
+});
+
+(async function iniciar() {
+    await carregarFuncionarios();
+})();
+</script>
+</body>
+</html>

@@ -1,15 +1,16 @@
-
-
 <!doctype html>
 <html lang="pt-BR">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <title>Controle de Acesso</title>
 
+    <!-- QR Code -->
     <script src="https://unpkg.com/html5-qrcode"></script>
+
+    <!-- Reconhecimento facial -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 
     <style>
         * {
@@ -17,11 +18,7 @@
             margin: 0;
             padding: 0;
             font-family:
-                -apple-system,
-                BlinkMacSystemFont,
-                "Segoe UI",
-                Roboto,
-                sans-serif;
+                -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
         body {
@@ -86,17 +83,47 @@
             background: #cbd5e1;
         }
 
+        button.faceId {
+            background: #7c3aed;
+        }
+
+        button.faceId:hover {
+            background: #6d28d9;
+        }
+
         button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
         }
 
-        #reader {
+        #reader,
+        #faceReader {
             width: 100%;
             margin-bottom: 15px;
             border-radius: 8px;
             overflow: hidden;
             display: none;
+        }
+
+        #faceReader {
+            position: relative;
+            background: #111827;
+        }
+
+        #faceVideo {
+            width: 100%;
+            display: block;
+            transform: scaleX(-1);
+        }
+
+        #faceCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            transform: scaleX(-1);
         }
 
         .status-box {
@@ -129,384 +156,795 @@
 
 <body>
 
-    <div class="card">
+<div class="card">
 
-        <h1>Controle de Fluxo</h1>
+    <h1>Controle de Fluxo</h1>
 
-        <p class="subtitle">
-            Ponto Físico:
-            <strong>SETOR-01</strong>
-        </p>
+    <p class="subtitle">
+        Ponto Físico:
+        <strong>SETOR-01</strong>
+    </p>
 
-        <div class="btn-group">
+    <div class="btn-group">
 
-            <button
-                id="btnNfc"
-                onclick="iniciarLeituraNFC()">
-                📡 Ler com Aproximação (NFC)
-            </button>
+        <button id="btnNfc" onclick="iniciarLeituraNFC()">
+            📡 Ler com Aproximação
+        </button>
 
-            <button
-                class="secondary"
-                id="btnQr"
-                onclick="toggleQrReader()">
-                📷 Ler com Câmera (QR Code)
-            </button>
+        <button class="secondary" id="btnQr" onclick="toggleQrReader()">
+            📷 Ler com Câmera
+        </button>
 
-        </div>
-
-        <div id="reader"></div>
-
-        <div
-            id="statusBox"
-            class="status-box">
-        </div>
+        <button class="faceId" id="btnFaceId" onclick="toggleFaceIdReader()">
+            👤 Leitor facial
+        </button>
 
     </div>
 
-    <script>
+    <!-- LEITOR QR -->
+    <div id="reader"></div>
 
-        const CODIGO_PONTO = "SETOR-01";
+    <!-- LEITOR FACIAL -->
+    <div id="faceReader">
 
-        let qrScanner = null;
-        let lendoQR = false;
+        <video
+            id="faceVideo"
+            autoplay
+            muted
+            playsinline>
+        </video>
 
+        <canvas id="faceCanvas"></canvas>
 
-        // =========================================================
-        // STATUS
-        // =========================================================
+    </div>
 
-        function exibirStatus(tipo, mensagem) {
+    <div id="statusBox" class="status-box"></div>
 
-            const box = document.getElementById("statusBox");
+</div>
 
-            box.className = `status-box status-${tipo}`;
 
-            box.innerHTML = mensagem;
+<script>
 
-            box.style.display = "block";
-        }
+const CODIGO_PONTO = "SETOR-01";
 
+let qrScanner = null;
+let lendoQR = false;
 
-        // =========================================================
-        // NFC
-        // =========================================================
 
-        async function iniciarLeituraNFC() {
+/* =========================================================
+   FACE ID
+   ========================================================= */
 
-            if (!("NDEFReader" in window)) {
+const FACE_MODEL_URL =
+    "https://justadudewhohacks.github.io/face-api.js/models";
 
-                exibirStatus(
-                    "error",
-                    "NFC não é suportado neste navegador. Utilize o QR Code."
-                );
+let faceModelsLoaded = false;
+let faceStream = null;
+let faceReaderAtivo = false;
+let processandoFace = false;
 
-                return;
-            }
 
-            try {
+/* =========================================================
+   STATUS
+   ========================================================= */
 
-                const ndef = new NDEFReader();
+function exibirStatus(tipo, mensagem) {
 
-                await ndef.scan();
+    const box = document.getElementById("statusBox");
 
-                exibirStatus(
-                    "info",
-                    "📡 Aproxime o celular da tag NFC..."
-                );
+    box.className = `status-box status-${tipo}`;
 
-                ndef.onreading = (event) => {
+    box.innerHTML = mensagem;
 
-                    const serialNumber = event.serialNumber;
+    box.style.display = "block";
+}
 
-                    console.log(
-                        "NFC detectado:",
-                        serialNumber
-                    );
 
-                    /*
-                     * IMPORTANTE:
-                     * O NFC possui um fluxo diferente do QR.
-                     *
-                     * Não enviamos o serialNumber para
-                     * validar_acesso.php, pois esse endpoint
-                     * espera um TOKEN de QR.
-                     */
+/* =========================================================
+   NFC
+   ========================================================= */
 
-                    exibirStatus(
-                        "info",
-                        `NFC detectado.<br>
-                         UID: ${serialNumber}`
-                    );
-                };
+async function iniciarLeituraNFC() {
 
-            } catch (error) {
+    if (!("NDEFReader" in window)) {
 
-                console.error(
-                    "Erro no NFC:",
-                    error
-                );
+        exibirStatus(
+            "error",
+            "NFC não é suportado neste navegador. Utilize o QR Code ou reconhecimento facial."
+        );
 
-                exibirStatus(
-                    "error",
-                    "Erro ao iniciar NFC: " + error.message
-                );
-            }
-        }
+        return;
+    }
 
+    try {
 
-        // =========================================================
-        // QR CODE
-        // =========================================================
+        const ndef = new NDEFReader();
 
-        async function toggleQrReader() {
+        await ndef.scan();
 
-            const readerDiv =
-                document.getElementById("reader");
+        exibirStatus(
+            "info",
+            "📡 Aproxime o celular da tag NFC..."
+        );
 
-            const btnQr =
-                document.getElementById("btnQr");
+        ndef.onreading = (event) => {
 
+            const serialNumber = event.serialNumber;
 
-            // Se já estiver lendo, encerra
-            if (lendoQR) {
-
-                await pararLeitorQR();
-
-                return;
-            }
-
-
-            try {
-
-                lendoQR = true;
-
-                readerDiv.style.display = "block";
-
-                btnQr.innerText = "⏹️ Parar Leitor QR";
-
-
-                qrScanner =
-                    new Html5Qrcode("reader");
-
-
-                await qrScanner.start(
-
-                    {
-                        facingMode: "environment"
-                    },
-
-                    {
-                        fps: 10,
-
-                        qrbox: {
-                            width: 250,
-                            height: 250
-                        },
-
-                        aspectRatio: 1.0
-                    },
-
-                    async (decodedText) => {
-
-                        console.log(
-                            "QR CODE LIDO:",
-                            decodedText
-                        );
-
-
-                        // Para o leitor
-                        await pararLeitorQR();
-
-
-                        // Envia o token para o PHP
-                        await processarRegistro(
-                            decodedText
-                        );
-                    },
-
-                    (errorMessage) => {
-
-                        // Erros de tentativa de leitura
-                        // são normais e não precisam
-                        // aparecer para o usuário.
-
-                    }
-                );
-
-            } catch (error) {
-
-                console.error(
-                    "Erro ao iniciar leitor QR:",
-                    error
-                );
-
-                lendoQR = false;
-
-                readerDiv.style.display = "none";
-
-                btnQr.innerText =
-                    "📷 Ler com Câmera (QR Code)";
-
-                exibirStatus(
-                    "error",
-                    "Não foi possível acessar a câmera."
-                );
-            }
-        }
-
-
-        // =========================================================
-        // PARA O LEITOR QR
-        // =========================================================
-
-        async function pararLeitorQR() {
-
-            const readerDiv =
-                document.getElementById("reader");
-
-            const btnQr =
-                document.getElementById("btnQr");
-
-
-            if (qrScanner) {
-
-                try {
-
-                    if (lendoQR) {
-                        await qrScanner.stop();
-                    }
-
-                } catch (error) {
-
-                    console.warn(
-                        "Erro ao parar leitor:",
-                        error
-                    );
-                }
-
-                qrScanner.clear();
-
-                qrScanner = null;
-            }
-
-
-            lendoQR = false;
-
-            readerDiv.style.display = "none";
-
-            btnQr.innerText =
-                "📷 Ler com Câmera (QR Code)";
-        }
-
-
-        // =========================================================
-        // ENVIA TOKEN PARA O BACKEND
-        // =========================================================
-
-        async function processarRegistro(token) {
+            console.log("NFC detectado:", serialNumber);
 
             exibirStatus(
                 "info",
-                "🔍 Validando QR Code..."
+                `NFC detectado.<br>
+                 UID: ${serialNumber}`
+            );
+        }
+
+    } catch (error) {
+
+        console.error("Erro no NFC:", error);
+
+        exibirStatus(
+            "error",
+            "Erro ao iniciar NFC: " + error.message
+        );
+    }
+}
+
+
+/* =========================================================
+   QR CODE
+   ========================================================= */
+
+async function toggleQrReader() {
+
+    const readerDiv = document.getElementById("reader");
+    const btnQr = document.getElementById("btnQr");
+
+    if (lendoQR) {
+
+        await pararLeitorQR();
+
+        return;
+    }
+
+    /* Se o Face ID estiver aberto, fecha */
+    if (faceReaderAtivo) {
+        await pararLeitorFacial();
+    }
+
+    try {
+
+        lendoQR = true;
+
+        readerDiv.style.display = "block";
+
+        btnQr.innerText = "⏹️ Parar Leitor QR";
+
+        qrScanner = new Html5Qrcode("reader");
+
+        await qrScanner.start(
+
+            {
+                facingMode: "environment"
+            },
+
+            {
+                fps: 10,
+
+                qrbox: {
+                    width: 250,
+                    height: 250
+                },
+
+                aspectRatio: 1.0
+            },
+
+            async (decodedText) => {
+
+                console.log(
+                    "QR CODE LIDO:",
+                    decodedText
+                );
+
+                await pararLeitorQR();
+
+                await processarRegistro(decodedText);
+            },
+
+            (errorMessage) => {
+                // Tentativas sem QR detectado são normais.
+            }
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Erro ao iniciar leitor QR:",
+            error
+        );
+
+        lendoQR = false;
+
+        readerDiv.style.display = "none";
+
+        btnQr.innerText =
+            "📷 Ler com Câmera";
+
+        exibirStatus(
+            "error",
+            "Não foi possível acessar a câmera."
+        );
+    }
+}
+
+
+/* =========================================================
+   PARA LEITOR QR
+   ========================================================= */
+
+async function pararLeitorQR() {
+
+    const readerDiv =
+        document.getElementById("reader");
+
+    const btnQr =
+        document.getElementById("btnQr");
+
+    if (qrScanner) {
+
+        try {
+
+            if (lendoQR) {
+                await qrScanner.stop();
+            }
+
+        } catch (error) {
+
+            console.warn(
+                "Erro ao parar leitor:",
+                error
+            );
+        }
+
+        try {
+            qrScanner.clear();
+        } catch (e) {}
+
+        qrScanner = null;
+    }
+
+    lendoQR = false;
+
+    readerDiv.style.display = "none";
+
+    btnQr.innerText =
+        "📷 Ler com Câmera";
+}
+
+
+/* =========================================================
+   ENVIA TOKEN PARA BACKEND
+   ========================================================= */
+
+async function processarRegistro(token) {
+
+    exibirStatus(
+        "info",
+        "🔍 Validando QR Code..."
+    );
+
+    token = token.trim();
+
+    if (!token) {
+
+        exibirStatus(
+            "error",
+            "QR Code vazio ou inválido."
+        );
+
+        return;
+    }
+
+    console.log(
+        "Token enviado:",
+        token
+    );
+
+    try {
+
+        const response = await fetch(
+            "validar_acesso.php",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body: JSON.stringify({
+                    token: token
+                })
+            }
+        );
+
+        const resultado =
+            await response.json();
+
+        console.log(
+            "Resposta do servidor:",
+            resultado
+        );
+
+        if (
+            response.ok &&
+            resultado.status === "sucesso"
+        ) {
+
+            exibirStatus(
+                "success",
+                `<strong>✓ ACESSO LIBERADO!</strong><br>
+                 ${resultado.mensagem}`
             );
 
+            return;
+        }
 
-            // Remove espaços acidentais
-            token = token.trim();
+        exibirStatus(
+            "error",
+            `<strong>✕ ACESSO NEGADO</strong><br>
+             ${resultado.mensagem ||
+                "QR Code inválido ou expirado."}`
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Erro na comunicação:",
+            error
+        );
+
+        exibirStatus(
+            "error",
+            "Falha na comunicação com o servidor."
+        );
+    }
+}
 
 
-            if (!token) {
+/* =========================================================
+   CARREGAR MODELOS FACIAIS
+   ========================================================= */
 
-                exibirStatus(
-                    "error",
-                    "QR Code vazio ou inválido."
-                );
+async function carregarModelosFaciais() {
+
+    if (faceModelsLoaded) {
+        return;
+    }
+
+    exibirStatus(
+        "info",
+        "🧠 Carregando reconhecimento facial..."
+    );
+
+    try {
+
+        await faceapi.nets.tinyFaceDetector.loadFromUri(
+            FACE_MODEL_URL
+        );
+
+        await faceapi.nets.faceLandmark68Net.loadFromUri(
+            FACE_MODEL_URL
+        );
+
+        await faceapi.nets.faceRecognitionNet.loadFromUri(
+            FACE_MODEL_URL
+        );
+
+        faceModelsLoaded = true;
+
+        console.log(
+            "Modelos faciais carregados."
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Erro carregando modelos:",
+            error
+        );
+
+        throw new Error(
+            "Não foi possível carregar os modelos faciais."
+        );
+    }
+}
+
+
+/* =========================================================
+   ABRIR / FECHAR FACE ID
+   ========================================================= */
+
+async function toggleFaceIdReader() {
+
+    if (faceReaderAtivo) {
+
+        await pararLeitorFacial();
+
+        return;
+    }
+
+    /* Fecha QR caso esteja aberto */
+    if (lendoQR) {
+        await pararLeitorQR();
+    }
+
+    try {
+
+        await carregarModelosFaciais();
+
+        const faceReader =
+            document.getElementById("faceReader");
+
+        const video =
+            document.getElementById("faceVideo");
+
+        const canvas =
+            document.getElementById("faceCanvas");
+
+        faceStream =
+            await navigator.mediaDevices.getUserMedia({
+
+                video: {
+                    facingMode: "user",
+                    width: {
+                        ideal: 640
+                    },
+                    height: {
+                        ideal: 480
+                    }
+                },
+
+                audio: false
+            });
+
+        video.srcObject =
+            faceStream;
+
+        await new Promise(resolve => {
+
+            video.onloadedmetadata =
+                resolve;
+
+        });
+
+        faceReader.style.display =
+            "block";
+
+        faceReaderAtivo =
+            true;
+
+        canvas.width =
+            video.videoWidth;
+
+        canvas.height =
+            video.videoHeight;
+
+        document.getElementById(
+            "btnFaceId"
+        ).innerText =
+            "⏹️ Parar Leitor Facial";
+
+        exibirStatus(
+            "info",
+            "👤 Posicione seu rosto diante da câmera..."
+        );
+
+        iniciarReconhecimentoFacial();
+
+    } catch (error) {
+
+        console.error(
+            "Erro no Face ID:",
+            error
+        );
+
+        exibirStatus(
+            "error",
+            "Não foi possível acessar a câmera ou carregar o reconhecimento facial."
+        );
+
+        await pararLeitorFacial();
+    }
+}
+
+
+/* =========================================================
+   RECONHECIMENTO FACIAL
+   ========================================================= */
+
+function iniciarReconhecimentoFacial() {
+
+    const video =
+        document.getElementById("faceVideo");
+
+    const canvas =
+        document.getElementById("faceCanvas");
+
+    const intervalo =
+        setInterval(async () => {
+
+            if (!faceReaderAtivo) {
+
+                clearInterval(intervalo);
 
                 return;
             }
 
+            if (
+                processandoFace ||
+                video.readyState < 2
+            ) {
+                return;
+            }
 
-            console.log(
-                "Token enviado:",
-                token
-            );
-
+            processandoFace = true;
 
             try {
 
-                const response = await fetch(
-                    "validar_acesso.php",
-                    {
-                        method: "POST",
+                const deteccoes =
+                    await faceapi
+                        .detectAllFaces(
+                            video,
+                            new faceapi.TinyFaceDetectorOptions({
+                                inputSize: 416,
+                                scoreThreshold: 0.5
+                            })
+                        )
+                        .withFaceLandmarks()
+                        .withFaceDescriptors();
 
-                        headers: {
-                            "Content-Type":
-                                "application/json"
-                        },
+                const contexto =
+                    canvas.getContext("2d");
 
-                        body: JSON.stringify({
-                            token: token
-                        })
-                    }
+                contexto.clearRect(
+                    0,
+                    0,
+                    canvas.width,
+                    canvas.height
                 );
 
-
-                const resultado =
-                    await response.json();
-
-
-                console.log(
-                    "Resposta do servidor:",
-                    resultado
-                );
-
-
-                // =================================================
-                // ACESSO LIBERADO
-                // =================================================
-
-                if (
-                    response.ok &&
-                    resultado.status === "sucesso"
-                ) {
+                /* Nenhum rosto */
+                if (deteccoes.length === 0) {
 
                     exibirStatus(
-                        "success",
-                        `<strong>✓ ACESSO LIBERADO!</strong><br>
-                         ${resultado.mensagem}`
+                        "info",
+                        "👤 Nenhum rosto detectado. Posicione-se diante da câmera."
                     );
+
+                    processandoFace = false;
 
                     return;
                 }
 
+                /* Mais de um rosto */
+                if (deteccoes.length > 1) {
 
-                // =================================================
-                // ACESSO NEGADO
-                // =================================================
+                    exibirStatus(
+                        "error",
+                        "⚠️ Mais de um rosto detectado. Apenas uma pessoa deve ficar diante da câmera."
+                    );
+
+                    processandoFace = false;
+
+                    return;
+                }
+
+                const deteccao =
+                    deteccoes[0];
+
+                /* Confiança da detecção */
+                if (
+                    deteccao.detection.score < 0.60
+                ) {
+
+                    exibirStatus(
+                        "info",
+                        "👤 Rosto detectado, mas a imagem está pouco nítida."
+                    );
+
+                    processandoFace = false;
+
+                    return;
+                }
 
                 exibirStatus(
-                    "error",
-                    `<strong>✕ ACESSO NEGADO</strong><br>
-                     ${resultado.mensagem || "QR Code inválido ou expirado."}`
+                    "info",
+                    "🔍 Rosto detectado. Identificando..."
                 );
+
+                const descriptor =
+                    Array.from(
+                        deteccao.descriptor
+                    );
+
+                const resultado =
+                    await validarRosto(
+                        descriptor
+                    );
+
+                if (resultado.sucesso) {
+
+                    await pararLeitorFacial();
+
+                    exibirStatus(
+                        "success",
+                        `<strong>✓ ACESSO LIBERADO!</strong><br>
+                         Funcionário: ${resultado.funcionario}<br>
+                         Matrícula: ${resultado.matricula || "-"}<br>
+                         Método: Reconhecimento facial`
+                    );
+
+                } else {
+
+                    exibirStatus(
+                        "error",
+                        `<strong>✕ ACESSO NEGADO</strong><br>
+                         ${resultado.mensagem}`
+                    );
+
+                    /*
+                     * Continua procurando.
+                     * Assim a pessoa pode tentar novamente.
+                     */
+                    await new Promise(
+                        resolve =>
+                            setTimeout(resolve, 1500)
+                    );
+                }
 
             } catch (error) {
 
                 console.error(
-                    "Erro na comunicação:",
+                    "Erro no reconhecimento:",
                     error
                 );
 
                 exibirStatus(
                     "error",
-                    "Falha na comunicação com o servidor."
+                    "Erro ao validar o rosto."
                 );
-            }
-        }
 
-    </script>
+            } finally {
+
+                processandoFace =
+                    false;
+            }
+
+        }, 1200);
+}
+
+
+/* =========================================================
+   ENVIA ROSTO PARA PHP
+   ========================================================= */
+
+async function validarRosto(descriptor) {
+
+    console.log(
+        "Enviando descriptor facial..."
+    );
+
+    try {
+
+        const response =
+            await fetch(
+                "validar_rosto.php",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        face_embedding:
+                            descriptor,
+                        codigo_ponto:
+                            CODIGO_PONTO
+                    })
+                }
+            );
+
+        const resultado =
+            await response.json();
+
+        console.log(
+            "Resposta Face ID:",
+            resultado
+        );
+
+        return resultado;
+
+    } catch (error) {
+
+        console.error(
+            error
+        );
+
+        return {
+            sucesso: false,
+            mensagem:
+                "Falha na comunicação com o servidor."
+        };
+    }
+}
+
+
+/* =========================================================
+   PARA LEITOR FACIAL
+   ========================================================= */
+
+async function pararLeitorFacial() {
+
+    faceReaderAtivo =
+        false;
+
+    processandoFace =
+        false;
+
+    if (faceStream) {
+
+        faceStream
+            .getTracks()
+            .forEach(track => {
+                track.stop();
+            });
+
+        faceStream =
+            null;
+    }
+
+    const video =
+        document.getElementById("faceVideo");
+
+    video.srcObject =
+        null;
+
+    document.getElementById(
+        "faceReader"
+    ).style.display =
+        "none";
+
+    document.getElementById(
+        "btnFaceId"
+    ).innerText =
+        "👤 Leitor facial";
+}
+
+
+/* =========================================================
+   LIMPA CÂMERA AO SAIR
+   ========================================================= */
+
+window.addEventListener(
+    "beforeunload",
+    () => {
+
+        if (faceStream) {
+
+            faceStream
+                .getTracks()
+                .forEach(track =>
+                    track.stop()
+                );
+        }
+    }
+);
+
+</script>
 
 </body>
-
 </html>
