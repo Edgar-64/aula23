@@ -59,12 +59,7 @@ if (
 $embeddingRecebido =
     array_map('floatval', $embeddingRecebido);
 
-
-/*
-|--------------------------------------------------------------------------
-| BUSCA FUNCIONÁRIOS COM ROSTO CADASTRADO
-|--------------------------------------------------------------------------
-*/
+    
 
 try {
 
