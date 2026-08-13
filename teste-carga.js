@@ -12,6 +12,8 @@ export const options = {
   },
 };
 
+const arquivo = open("./tokens_acesso.csv");
+
 const tokens = [
     '6d9e0c52a4f14b92da76d34339aba7aa',
     'd2dd0de6fe4c0e2c5850624c93271ced',
